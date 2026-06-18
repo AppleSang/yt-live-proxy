@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Cấu hình CORS
+  // Cấu hình CORS cho phép mọi domain truy cập
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -21,46 +21,43 @@ export default async function handler(req, res) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5'
       },
-      redirect: 'manual'
+      redirect: 'manual' // Chặn không cho tự động chuyển hướng
     });
 
     // Tải toàn bộ mã nguồn HTML gốc từ YouTube về
     const htmlContent = await response.text();
 
-    // TRƯỜNG HỢP 1: Người dùng muốn lấy FILE HTML RAW gốc từ YouTube
+    // TRƯỜNG HỢP 1: Nếu người dùng truyền &raw=true -> Trả về toàn bộ file HTML gốc
     if (raw === 'true') {
-      // Trả về định dạng text/plain để trình duyệt hiển thị dạng code mã nguồn thuần tuý, không tự render
       res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
       return res.status(response.status).send(htmlContent);
     }
 
-    // Kiểm tra dấu hiệu Live nghiêm ngặt cho 2 trường hợp còn lại
+    // ĐIỀU KIỆN CHẶT CHẼ: Kiểm tra xem có cấu trúc phòng Live chuẩn không
+    // Phải chứa đối tượng định tuyến window['ytCommand'] và đường dẫn có chữ '/live'
     const isRedirect = response.status === 301 || response.status === 302;
-    const hasLiveSignal = htmlContent.includes('"isLive":true') || htmlContent.includes('"isLiveStream":true') || htmlContent.includes('iconType":"LIVE"');
+    const hasLiveSignal = htmlContent.includes("window['ytCommand']") && htmlContent.includes("'/live'");
     const isLive = !isRedirect && hasLiveSignal;
 
     let streamId = null;
     if (isLive) {
+      // Quét chính xác cấu trúc watchEndpoint nằm bên trong lệnh điều hướng toàn cục của trang Live
       const ytCommandMatch = htmlContent.match(/"watchEndpoint"\s*:\s*\{\s*"videoId"\s*:\s*"([\w-]{11})"/);
       if (ytCommandMatch && ytCommandMatch[1]) {
         streamId = ytCommandMatch[1];
       }
-      if (!streamId) {
-        const alternativeMatch = htmlContent.match(/"videoId"\s*:\s*"([\w-]{11})"\s*,\s*"isLive"/);
-        if (alternativeMatch && alternativeMatch[1]) streamId = alternativeMatch[1];
-      }
     }
 
-    // TRƯỜNG HỢP 2: Người dùng muốn xem Giao diện thông báo HTML (Vercel tự render)
+    // TRƯỜNG HỢP 2: Nếu người dùng muốn xem giao diện báo trạng thái HTML (&html=true)
     if (html === 'true') {
       res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-      const bgColor = isLive ? '#22c55e' : '#ef4444';
-      const statusText = isLive ? '🔴 STREAM IS LIVE' : '⚪ STREAM OFFLINE';
-      const subText = isLive 
-        ? `Found Stream ID: <strong style="font-family:monospace; background:#fff; padding:2px 6px; border-radius:4px; color:#111;">${streamId || 'Unknown'}</strong>` 
+      const bgColor = (isLive && streamId) ? '#22c55e' : '#ef4444';
+      const statusText = (isLive && streamId) ? '🔴 STREAM IS LIVE' : '⚪ STREAM OFFLINE';
+      const subText = (isLive && streamId) 
+        ? `Found Stream ID: <strong style="font-family:monospace; background:#fff; padding:2px 6px; border-radius:4px; color:#111;">${streamId}</strong>` 
         : `Status: LIVE_NOT_FOUND`;
 
-      return res.status(isLive ? 200 : 404).send(`
+      return res.status((isLive && streamId) ? 200 : 404).send(`
         <!DOCTYPE html>
         <html>
         <head>
@@ -83,11 +80,13 @@ export default async function handler(req, res) {
       `);
     }
 
-    // TRƯỜNG HỢP 3 (MẶC ĐỊNH): Trả về chuỗi 11 ký tự Stream ID hoặc LIVE_NOT_FOUND phục vụ code chat box
+    // TRƯỜNG HỢP 3: Mặc định (Dành cho code Chat Box) -> Chỉ trả lại chuỗi 11 ký tự Stream ID
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
     if (isLive && streamId) {
       return res.status(200).send(streamId);
     }
+    
+    // Nếu Offline hoặc lỗi không bóc được ID luồng Live
     return res.status(404).send("LIVE_NOT_FOUND");
 
   } catch (error) {
