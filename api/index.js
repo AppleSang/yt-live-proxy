@@ -1,11 +1,12 @@
 export default async function handler(req, res) {
-  // Cấu hình CORS cho phép mọi domain truy cập
+  // Cấu hình CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // Đọc tất cả tham số query
   const { url, raw, html } = req.query;
 
   if (!url) {
@@ -21,27 +22,26 @@ export default async function handler(req, res) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5'
       },
-      redirect: 'manual' // Chặn không cho tự động chuyển hướng
+      redirect: 'manual'
     });
 
     // Tải toàn bộ mã nguồn HTML gốc từ YouTube về
     const htmlContent = await response.text();
 
-    // TRƯỜNG HỢP 1: Nếu người dùng truyền &raw=true -> Trả về toàn bộ file HTML gốc
-    if (raw === 'true') {
+    // 🔥 ƯU TIÊN SỐ 1: Nếu người dùng muốn lấy RAW HTML, trả về ngay lập tức!
+    // Kiểm tra xem chữ 'true' có nằm trong tham số raw hoặc nằm lọt trong URL do viết sai cấu trúc hay không
+    if (raw === 'true' || req.url.includes('raw=true')) {
       res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
       return res.status(response.status).send(htmlContent);
     }
 
-    // ĐIỀU KIỆN CHẶT CHẼ: Kiểm tra xem có cấu trúc phòng Live chuẩn không
-    // Phải chứa đối tượng định tuyến window['ytCommand'] và đường dẫn có chữ '/live'
+    // --- CÁC LOGIC KIỂM TRA ĐANG LIVE KHÁC KHÔNG ĐỔI ---
     const isRedirect = response.status === 301 || response.status === 302;
     const hasLiveSignal = htmlContent.includes("window['ytCommand']") && htmlContent.includes("'/live'");
     const isLive = !isRedirect && hasLiveSignal;
 
     let streamId = null;
     if (isLive) {
-      // Quét chính xác cấu trúc watchEndpoint nằm bên trong lệnh điều hướng toàn cục của trang Live
       const ytCommandMatch = htmlContent.match(/"watchEndpoint"\s*:\s*\{\s*"videoId"\s*:\s*"([\w-]{11})"/);
       if (ytCommandMatch && ytCommandMatch[1]) {
         streamId = ytCommandMatch[1];
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     }
 
     // TRƯỜNG HỢP 2: Nếu người dùng muốn xem giao diện báo trạng thái HTML (&html=true)
-    if (html === 'true') {
+    if (html === 'true' || req.url.includes('html=true')) {
       res.setHeader('Content-Type', 'text/html; charset=UTF-8');
       const bgColor = (isLive && streamId) ? '#22c55e' : '#ef4444';
       const statusText = (isLive && streamId) ? '🔴 STREAM IS LIVE' : '⚪ STREAM OFFLINE';
@@ -86,7 +86,6 @@ export default async function handler(req, res) {
       return res.status(200).send(streamId);
     }
     
-    // Nếu Offline hoặc lỗi không bóc được ID luồng Live
     return res.status(404).send("LIVE_NOT_FOUND");
 
   } catch (error) {
