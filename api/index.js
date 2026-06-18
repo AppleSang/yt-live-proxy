@@ -1,12 +1,11 @@
 export default async function handler(req, res) {
-  // Cấu hình CORS
+  // Cấu hình CORS cho phép mọi domain truy cập
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // Đọc tất cả tham số query
   const { url, raw, html } = req.query;
 
   if (!url) {
@@ -22,20 +21,19 @@ export default async function handler(req, res) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5'
       },
-      redirect: 'manual'
+      redirect: 'manual' // Giữ nguyên phản hồi gốc, không tự động chuyển hướng
     });
 
     // Tải toàn bộ mã nguồn HTML gốc từ YouTube về
     const htmlContent = await response.text();
 
-    // 🔥 ƯU TIÊN SỐ 1: Nếu người dùng muốn lấy RAW HTML, trả về ngay lập tức!
-    // Kiểm tra xem chữ 'true' có nằm trong tham số raw hoặc nằm lọt trong URL do viết sai cấu trúc hay không
+    // 🔥 ĐIỀU KIỆN QUAN TRỌNG: Nếu có tham số raw=true (hoặc viết nhầm trong chuỗi url), TRẢ VỀ RAW FILE NGAY
     if (raw === 'true' || req.url.includes('raw=true')) {
       res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
       return res.status(response.status).send(htmlContent);
     }
 
-    // --- CÁC LOGIC KIỂM TRA ĐANG LIVE KHÁC KHÔNG ĐỔI ---
+    // --- CÁC LOGIC XỬ LÝ ĐỂ LẤY STREAM-ID MẶC ĐỊNH CHO CHAT BOX ---
     const isRedirect = response.status === 301 || response.status === 302;
     const hasLiveSignal = htmlContent.includes("window['ytCommand']") && htmlContent.includes("'/live'");
     const isLive = !isRedirect && hasLiveSignal;
@@ -48,7 +46,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // TRƯỜNG HỢP 2: Nếu người dùng muốn xem giao diện báo trạng thái HTML (&html=true)
+    // Nếu muốn xem giao diện HTML (&html=true)
     if (html === 'true' || req.url.includes('html=true')) {
       res.setHeader('Content-Type', 'text/html; charset=UTF-8');
       const bgColor = (isLive && streamId) ? '#22c55e' : '#ef4444';
@@ -80,7 +78,7 @@ export default async function handler(req, res) {
       `);
     }
 
-    // TRƯỜNG HỢP 3: Mặc định (Dành cho code Chat Box) -> Chỉ trả lại chuỗi 11 ký tự Stream ID
+    // Mặc định (Không truyền tham số gì): Chỉ trả ra chuỗi 11 ký tự Stream ID cho chat box
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
     if (isLive && streamId) {
       return res.status(200).send(streamId);
