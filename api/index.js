@@ -21,41 +21,48 @@ export default async function handler(req, res) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5'
       },
-      redirect: 'manual' // Giữ nguyên phản hồi gốc, không tự động chuyển hướng
+      redirect: 'manual'
     });
 
     // Tải toàn bộ mã nguồn HTML gốc từ YouTube về
     const htmlContent = await response.text();
 
-    // 🔥 ĐIỀU KIỆN QUAN TRỌNG: Nếu có tham số raw=true (hoặc viết nhầm trong chuỗi url), TRẢ VỀ RAW FILE NGAY
+    // TRƯỜNG HỢP 1: Nếu người dùng muốn lấy RAW HTML, trả về ngay lập tức
     if (raw === 'true' || req.url.includes('raw=true')) {
       res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
       return res.status(response.status).send(htmlContent);
     }
 
-    // --- CÁC LOGIC XỬ LÝ ĐỂ LẤY STREAM-ID MẶC ĐỊNH CHO CHAT BOX ---
-    const isRedirect = response.status === 301 || response.status === 302;
-    const hasLiveSignal = htmlContent.includes("window['ytCommand']") && htmlContent.includes("'/live'");
-    const isLive = !isRedirect && hasLiveSignal;
-
     let streamId = null;
-    if (isLive) {
+
+    // QUÉT REGEX THEO YÊU CẦU: Tìm videoId xuất hiện sau cụm "apiUrl":"/youtubei/v1/like/like"
+    // Regex này sẽ tìm chuỗi /like/like, sau đó quét tiếp một đoạn ngắn tìm cặp cấu trúc "videoId":"..." gần nhất
+    const likeRegex = /"apiUrl"\s*:\s*"\/youtubei\/v1\/like\/like".*?"videoId"\s*:\s*"([\w-]{11})"/s;
+    const match = htmlContent.match(likeRegex);
+    
+    if (match && match[1]) {
+      streamId = match[1];
+    }
+
+    // Phương án dự phòng 1: Nếu cấu trúc trên lỗi, quét theo watchEndpoint cũ (từ file pt.html của bạn)
+    if (!streamId) {
       const ytCommandMatch = htmlContent.match(/"watchEndpoint"\s*:\s*\{\s*"videoId"\s*:\s*"([\w-]{11})"/);
       if (ytCommandMatch && ytCommandMatch[1]) {
         streamId = ytCommandMatch[1];
       }
     }
 
-    // Nếu muốn xem giao diện HTML (&html=true)
+    // TRƯỜNG HỢP 2: Nếu người dùng muốn xem giao diện báo trạng thái HTML (&html=true)
     if (html === 'true' || req.url.includes('html=true')) {
       res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-      const bgColor = (isLive && streamId) ? '#22c55e' : '#ef4444';
-      const statusText = (isLive && streamId) ? '🔴 STREAM IS LIVE' : '⚪ STREAM OFFLINE';
-      const subText = (isLive && streamId) 
+      const isLive = !!streamId && (response.status !== 301 && response.status !== 302);
+      const bgColor = isLive ? '#22c55e' : '#ef4444';
+      const statusText = isLive ? '🔴 STREAM IS LIVE' : '⚪ STREAM OFFLINE';
+      const subText = isLive 
         ? `Found Stream ID: <strong style="font-family:monospace; background:#fff; padding:2px 6px; border-radius:4px; color:#111;">${streamId}</strong>` 
         : `Status: LIVE_NOT_FOUND`;
 
-      return res.status((isLive && streamId) ? 200 : 404).send(`
+      return res.status(isLive ? 200 : 404).send(`
         <!DOCTYPE html>
         <html>
         <head>
@@ -78,9 +85,9 @@ export default async function handler(req, res) {
       `);
     }
 
-    // Mặc định (Không truyền tham số gì): Chỉ trả ra chuỗi 11 ký tự Stream ID cho chat box
+    // TRƯỜNG HỢP 3: Mặc định (Dành cho code Chat Box) -> Chỉ trả lại chuỗi 11 ký tự Stream ID
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-    if (isLive && streamId) {
+    if (streamId && response.status !== 301 && response.status !== 302) {
       return res.status(200).send(streamId);
     }
     
