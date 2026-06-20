@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   if (!url) {
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-    return res.status(400).send("Missing url parameter");
+    return res.status(400).send("Missing url parameter // Read more here: https://github.com/AppleSang/yt-live-proxy/blob/main/README.md");
   }
 
   try {
